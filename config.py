@@ -25,5 +25,5 @@ BOT_TOKEN: str = get_required("BOT_TOKEN")
 REMIND_BEFORE_MINUTES: int = get_int("REMIND_BEFORE_MINUTES", 60) #время начала пары
 CHECK_INTERVAL_SECONDS: int = get_int("CHECK_INTERVAL_SECONDS", 60)
 REFRESH_SCHEDULE_MINUTES: int = get_int("REFRESH_SCHEDULE_MINUTES", 20)
-TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Europe/Moscow"))
+TIMEZONE = ZoneInfo(os.getenv("TIMEZONE") or "Europe/Moscow")
 REMINDER_WINDOW_MINUTES: int = get_int("REMINDER_WINDOW_MINUTES", 3)
