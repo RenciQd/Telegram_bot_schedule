@@ -5,7 +5,7 @@ from datetime import date, datetime, time
 from pathlib import Path
 from typing import Optional
 
-from scraper import Lesson
+from scrapers import Lesson
 
 DEFAULT_PATH = Path(__file__).parent / "data" / "schedule_cache.json"
 
@@ -42,7 +42,7 @@ class ScheduleCacheStore:
     def __init__(self, path: Path | str = DEFAULT_PATH):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._data: dict[str, dict] = self._load()
+        self._data: dict[str, dict] = self.load()
 
     def load(self) -> dict[str, dict]:
         if not self.path.exists():
@@ -74,8 +74,8 @@ class ScheduleCacheStore:
             "lessons": [lesson_to_dict(l) for l in lessons],
             "fetched_at": fetched_at.isoformat(),
         }
-        self._save()
+        self.save()
 
     def forget(self, chat_id: int) -> None:
         if self._data.pop(str(chat_id), None) is not None:
-            self._save()
+            self.save()

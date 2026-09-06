@@ -48,7 +48,7 @@ class UsersStore:
         if not entry:
             return False
         entry["muted"] = muted
-        self._save()
+        self.save()
         return True
 
     def is_muted(self, chat_id: int) -> bool:
@@ -59,7 +59,7 @@ class UsersStore:
         key = str(chat_id)
         if key in self._data:
             del self._data[key]
-            self._save()
+            self.save()
             return True
         return False
 

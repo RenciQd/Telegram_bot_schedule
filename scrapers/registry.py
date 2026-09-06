@@ -19,9 +19,6 @@ def is_generic(url: str) -> bool:
     return pick_scraper(url) is generic
 
 
-def fetch_html(url: str, timeout: int = 20) -> str:
-    return fetch_html(url, timeout=timeout)
-
 def parse_html(url: str, html: str, today: Optional[date] = None) -> list[Lesson]:
     return pick_scraper(url).parse_html(html, today=today)
 

@@ -11,7 +11,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import config
-from scraper import Lesson, fetch_html, is_generic, looks_like_schedule_page, parse_html
+from scrapers import Lesson, fetch_html, is_generic, looks_like_schedule_page, parse_html
 from schedule_cache_store import ScheduleCacheStore
 from storage import NotifiedStore
 from users_store import UsersStore
@@ -45,7 +45,7 @@ async def refresh_cache_if_needed(chat_id: int, url: str, force: bool = False) -
             return
     try:
         html = await asyncio.to_thread(fetch_html, url)
-        lessons = parse_html(html, today=date.today())
+        lessons = parse_html(url, html, today=date.today())
         schedule_cache.set(chat_id, lessons, now())
         log.info("Обновил расписание для %s, пар в кэше: %d", chat_id, len(lessons))
     except Exception:
@@ -107,14 +107,14 @@ async def try_register(message: Message, url: str) -> None:
         )
         return
 
-    if not looks_like_schedule_page(html):
+    if not looks_like_schedule_page(url, html):
         await status.edit_text(
             "Страница загрузилась, но я не нашёл в ней знакомую таблицу "
             "расписания. Убедись, что это ссылка вида и пришли ещё раз"
         )
         return
 
-    lessons = parse_html(html, today=date.today())
+    lessons = parse_html(url, html, today=date.today())
     users_store.set_url(message.chat.id, url)
     schedule_cache.set(message.chat.id, lessons, now())
     muted = users_store.is_muted(message.chat.id)
