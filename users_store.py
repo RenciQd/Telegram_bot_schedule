@@ -1,67 +1,61 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
+from redis_client import redis
 
-DEFAULT_PATH = Path(__file__).parent / "data" / "users.json"
+USERS_INDEX_KEY = "users:index"
+
+
+def user_key(chat_id: int) -> str:
+    return f"user:{chat_id}"
 
 
 class UsersStore:
-    def __init__(self, path: Path | str = DEFAULT_PATH):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._data: dict[str, dict] = self.load()
+    async def get_raw(self, chat_id: int) -> Optional[dict]:
+        data = await redis.hgetall(user_key(chat_id))
+        return data or None
 
-    def load(self) -> dict[str, dict]:
-        if not self.path.exists():
-            return {}
-        try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
-
-    def save(self) -> None:
-        self.path.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+    async def set_url(self, chat_id: int, url: str) -> None:
+        existing = await self.get_raw(chat_id)
+        muted = existing.get("muted") == "1" if existing else False
+        await redis.hset(
+            user_key(chat_id),
+            values={
+                "url": url,
+                "muted": "1" if muted else "0",
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            },
         )
+        await redis.sadd(USERS_INDEX_KEY, chat_id)
 
-    def set_url(self, chat_id: int, url: str) -> None:
-        key = str(chat_id)
-        existing_muted = self._data.get(key, {}).get("muted", False)
-        self._data[key] = {
-            "url": url,
-            "muted": existing_muted,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
-        }
-        self.save()
-
-    def get_url(self, chat_id: int) -> Optional[str]:
-        entry = self._data.get(str(chat_id))
+    async def get_url(self, chat_id: int) -> Optional[str]:
+        entry = await self.get_raw(chat_id)
         return entry["url"] if entry else None
 
-    def set_muted(self, chat_id: int, muted: bool) -> bool:
-        key = str(chat_id)
-        entry = self._data.get(key)
-        if not entry:
+    async def set_muted(self, chat_id: int, muted: bool) -> bool:
+        if not await redis.exists(user_key(chat_id)):
             return False
-        entry["muted"] = muted
-        self.save()
+        await redis.hset(user_key(chat_id), field="muted", value="1" if muted else "0")
         return True
 
-    def is_muted(self, chat_id: int) -> bool:
-        entry = self._data.get(str(chat_id))
-        return bool(entry.get("muted")) if entry else False
+    async def is_muted(self, chat_id: int) -> bool:
+        entry = await self.get_raw(chat_id)
+        return bool(entry) and entry.get("muted") == "1"
 
-    def remove(self, chat_id: int) -> bool:
-        key = str(chat_id)
-        if key in self._data:
-            del self._data[key]
-            self.save()
-            return True
-        return False
+    async def remove(self, chat_id: int) -> bool:
+        key = user_key(chat_id)
+        existed = bool(await redis.exists(key))
+        if existed:
+            await redis.delete(key)
+            await redis.srem(USERS_INDEX_KEY, chat_id)
+        return existed
 
-    def items(self) -> list[tuple[int, str]]:
-        return [(int(chat_id), entry["url"]) for chat_id, entry in self._data.items()]
+    async def items(self) -> list[tuple[int, str]]:
+        chat_ids = await redis.smembers(USERS_INDEX_KEY)
+        result = []
+        for chat_id in chat_ids:
+            url = await self.get_url(int(chat_id))
+            if url:
+                result.append((int(chat_id), url))
+        return result

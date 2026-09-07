@@ -8,7 +8,7 @@ from typing import Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 
 import config
 from scrapers import Lesson, fetch_html, is_generic, looks_like_schedule_page, parse_html
@@ -37,8 +37,13 @@ bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher()
 
 
+async def process_webhook_update(data: dict) -> None:
+    update = Update.model_validate(data)
+    await dp.feed_update(bot, update)
+
+
 async def refresh_cache_if_needed(chat_id: int, url: str, force: bool = False) -> None:
-    cached = schedule_cache.get(chat_id)
+    cached = await schedule_cache.get(chat_id)
     if cached and not force:
         _, fetched_at = cached
         if now() - fetched_at <= timedelta(minutes=config.REFRESH_SCHEDULE_MINUTES):
@@ -46,18 +51,18 @@ async def refresh_cache_if_needed(chat_id: int, url: str, force: bool = False) -
     try:
         html = await asyncio.to_thread(fetch_html, url)
         lessons = parse_html(url, html, today=date.today())
-        schedule_cache.set(chat_id, lessons, now())
+        await schedule_cache.set(chat_id, lessons, now())
         log.info("Обновил расписание для %s, пар в кэше: %d", chat_id, len(lessons))
     except Exception:
         log.exception("Не удалось обновить расписание для %s", chat_id)
 
 
 async def lessons_for(chat_id: int, target_date: date) -> Optional[list[Lesson]]:
-    url = users_store.get_url(chat_id)
+    url = await users_store.get_url(chat_id)
     if not url:
         return None
     await refresh_cache_if_needed(chat_id, url)
-    cached = schedule_cache.get(chat_id)
+    cached = await schedule_cache.get(chat_id)
     if not cached:
         return []
     lessons, _ = cached
@@ -115,9 +120,9 @@ async def try_register(message: Message, url: str) -> None:
         return
 
     lessons = parse_html(url, html, today=date.today())
-    users_store.set_url(message.chat.id, url)
-    schedule_cache.set(message.chat.id, lessons, now())
-    muted = users_store.is_muted(message.chat.id)
+    await users_store.set_url(message.chat.id, url)
+    await schedule_cache.set(message.chat.id, lessons, now())
+    muted = await users_store.is_muted(message.chat.id)
 
     heads_up = ""
     if is_generic(url):
@@ -138,9 +143,9 @@ async def try_register(message: Message, url: str) -> None:
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message) -> None:
-    existing = users_store.get_url(message.chat.id)
+    existing = await users_store.get_url(message.chat.id)
     if existing:
-        muted = users_store.is_muted(message.chat.id)
+        muted = await users_store.is_muted(message.chat.id)
         status_line = "🔕 сейчас выключены" if muted else "🔔 сейчас включены"
         await message.answer(
             f"У тебя уже есть это расписание \n{existing}\n"
@@ -195,20 +200,20 @@ async def cmd_tomorrow(message: Message) -> None:
 
 @dp.message(Command("refresh"))
 async def cmd_refresh(message: Message) -> None:
-    url = users_store.get_url(message.chat.id)
+    url = await users_store.get_url(message.chat.id)
     if not url:
         await message.answer("Сначала пришли ссылку на расписание.")
         return
     await refresh_cache_if_needed(message.chat.id, url, force=True)
-    cached = schedule_cache.get(message.chat.id)
+    cached = await schedule_cache.get(message.chat.id)
     count = len(cached[0]) if cached else 0
     await message.answer(f"Готово, обновил. Пар в кэше: {count}")
 
 
 @dp.message(Command("forget"))
 async def cmd_forget(message: Message) -> None:
-    removed = users_store.remove(message.chat.id)
-    schedule_cache.forget(message.chat.id)
+    removed = await users_store.remove(message.chat.id)
+    await schedule_cache.forget(message.chat.id)
     if removed:
         await message.answer("Забыл эту ссылку. Пришли новую, когда понадобится.")
     else:
@@ -217,7 +222,7 @@ async def cmd_forget(message: Message) -> None:
 
 @dp.message(Command("mute"))
 async def cmd_mute(message: Message) -> None:
-    if not users_store.set_muted(message.chat.id, True):
+    if not await users_store.set_muted(message.chat.id, True):
         await message.answer("У тебя ещё нет сохранённой ссылки на расписание.")
         return
     await message.answer(
@@ -229,7 +234,7 @@ async def cmd_mute(message: Message) -> None:
 
 @dp.message(Command("unmute"))
 async def cmd_unmute(message: Message) -> None:
-    if not users_store.set_muted(message.chat.id, False):
+    if not await users_store.set_muted(message.chat.id, False):
         await message.answer("У тебя ещё нет сохранённой ссылки на расписание.")
         return
     await message.answer(
@@ -242,7 +247,7 @@ async def cmd_unmute(message: Message) -> None:
 async def handle_mute_button(callback: CallbackQuery) -> None:
     chat_id = callback.message.chat.id
     muted = callback.data == "mute"
-    if not users_store.set_muted(chat_id, muted):
+    if not await users_store.set_muted(chat_id, muted):
         await callback.answer("У тебя ещё нет сохранённой ссылки на расписание.", show_alert=True)
         return
     text = (
@@ -269,15 +274,15 @@ async def run_reminder_check() -> None:
     remind_before = timedelta(minutes=config.REMIND_BEFORE_MINUTES)
     current = now()
 
-    for chat_id, url in users_store.items():
-        if users_store.is_muted(chat_id):
-            continue 
+    for chat_id, url in await users_store.items():
+        if await users_store.is_muted(chat_id):
+            continue
         try:
             await refresh_cache_if_needed(chat_id, url)
         except Exception:
             log.exception("Не удалось обновить расписание для %s в проверке напоминаний", chat_id)
             continue
-        cached = schedule_cache.get(chat_id)
+        cached = await schedule_cache.get(chat_id)
         if not cached:
             continue
         lessons, _ = cached
@@ -286,10 +291,10 @@ async def run_reminder_check() -> None:
             delta = start_dt - current
             if remind_before - window <= delta <= remind_before + window:
                 key = notified_store.make_key(chat_id, lesson)
-                if not notified_store.contains(key):
+                if not await notified_store.contains(key):
                     try:
                         await bot.send_message(chat_id, lesson.format_for_telegram())
-                        notified_store.add(key)
+                        await notified_store.add(key)
                         log.info("Отправлено напоминание %s: %s", chat_id, key)
                     except Exception:
                         log.exception("Не удалось отправить напоминание %s", chat_id)

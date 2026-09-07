@@ -1,16 +1,18 @@
 import os
 from zoneinfo import ZoneInfo
 
+from upstash_redis.asyncio import Redis
 from dotenv import load_dotenv
 
 load_dotenv() 
+
+redis = Redis.from_env()
 
 def get_required(name: str) -> str:
     value = os.getenv(name)
     if not value:
         raise RuntimeError(
             f"Не задана переменная окружения {name}. "
-            f"Скопируй .env.example в .env и заполни его."
         )
     return value
 

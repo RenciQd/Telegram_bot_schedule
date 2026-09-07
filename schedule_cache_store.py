@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, time
-from pathlib import Path
 from typing import Optional
 
+from redis_client import redis
 from scrapers import Lesson
-
-DEFAULT_PATH = Path(__file__).parent / "data" / "schedule_cache.json"
 
 
 def lesson_to_dict(lesson: Lesson) -> dict:
@@ -38,44 +36,32 @@ def lesson_from_dict(d: dict) -> Lesson:
     )
 
 
+def cache_key(chat_id: int) -> str:
+    return f"schedule_cache:{chat_id}"
+
+
 class ScheduleCacheStore:
-    def __init__(self, path: Path | str = DEFAULT_PATH):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._data: dict[str, dict] = self.load()
-
-    def load(self) -> dict[str, dict]:
-        if not self.path.exists():
-            return {}
-        try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
-
-    def save(self) -> None:
-        self.path.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-    def get(self, chat_id: int) -> Optional[tuple[list[Lesson], datetime]]:
-        entry = self._data.get(str(chat_id))
-        if not entry:
+    async def get(self, chat_id: int) -> Optional[tuple[list[Lesson], datetime]]:
+        raw = await redis.get(cache_key(chat_id))
+        if not raw:
             return None
         try:
+            entry = json.loads(raw)
             lessons = [lesson_from_dict(x) for x in entry["lessons"]]
             fetched_at = datetime.fromisoformat(entry["fetched_at"])
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, json.JSONDecodeError):
             return None
         return lessons, fetched_at
 
-    def set(self, chat_id: int, lessons: list[Lesson], fetched_at: datetime) -> None:
-        self._data[str(chat_id)] = {
-            "lessons": [lesson_to_dict(l) for l in lessons],
-            "fetched_at": fetched_at.isoformat(),
-        }
-        self.save()
+    async def set(self, chat_id: int, lessons: list[Lesson], fetched_at: datetime) -> None:
+        payload = json.dumps(
+            {
+                "lessons": [lesson_to_dict(l) for l in lessons],
+                "fetched_at": fetched_at.isoformat(),
+            },
+            ensure_ascii=False,
+        )
+        await redis.set(cache_key(chat_id), payload)
 
-    def forget(self, chat_id: int) -> None:
-        if self._data.pop(str(chat_id), None) is not None:
-            self.save()
+    async def forget(self, chat_id: int) -> None:
+        await redis.delete(cache_key(chat_id))
