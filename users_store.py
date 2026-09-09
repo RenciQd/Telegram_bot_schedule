@@ -21,7 +21,7 @@ class UsersStore:
         muted = existing.get("muted") == "1" if existing else False
         await redis.hset(
             user_key(chat_id),
-            values={
+            mapping={
                 "url": url,
                 "muted": "1" if muted else "0",
                 "updated_at": datetime.now().isoformat(timespec="seconds"),
@@ -36,7 +36,7 @@ class UsersStore:
     async def set_muted(self, chat_id: int, muted: bool) -> bool:
         if not await redis.exists(user_key(chat_id)):
             return False
-        await redis.hset(user_key(chat_id), field="muted", value="1" if muted else "0")
+        await redis.hset(user_key(chat_id), key="muted", value="1" if muted else "0")
         return True
 
     async def is_muted(self, chat_id: int) -> bool:
